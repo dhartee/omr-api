@@ -25,7 +25,9 @@ def process_custom_omr(image):
         return {"error": "Main question border detect nahi hua. Photo clear nahi hai."}
 
     warped = four_point_transform(gray, question_box_contour.reshape(4, 2))
-    thresh = cv2.threshold(warped, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    
+    # --- SHADOW FIX: Adaptive Threshold (Handles mobile photos perfectly) ---
+    thresh = cv2.adaptiveThreshold(warped, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 10)
 
     H, W = thresh.shape
     cw = W / 5.0
@@ -34,7 +36,6 @@ def process_custom_omr(image):
     answers = {}
     options_map = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E'}
 
-    # 100 Questions loop
     for q_index in range(100):
         c = q_index // 20
         r = q_index % 20
@@ -60,14 +61,19 @@ def process_custom_omr(image):
         max_pixels = max(pixels_per_option)
         marked_option_idx = pixels_per_option.index(max_pixels)
 
-        if max_pixels > 150:
-            sorted_pixels = sorted(pixels_per_option, reverse=True)
-            if sorted_pixels[1] > max_pixels * 0.6: 
-                answers[str(q_index + 1)] = None # Double marked
-            else:
+        # --- DYNAMIC INK DETECTION (Resolves Double Marked error) ---
+        sorted_pixels = sorted(pixels_per_option, reverse=True)
+        
+        if max_pixels > 80: # Base minimum ink to be considered a mark
+            if sorted_pixels[0] > (sorted_pixels[1] * 1.3): 
+                # Clear single mark
                 answers[str(q_index + 1)] = options_map[marked_option_idx]
+            else:
+                # Two bubbles have very similar dark pixels = Double marked / Cancelled
+                answers[str(q_index + 1)] = None 
         else:
-            answers[str(q_index + 1)] = None # Blank
+            # Not enough ink anywhere = Blank
+            answers[str(q_index + 1)] = None 
 
     return {
         "ok": True,
